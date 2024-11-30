@@ -62,22 +62,17 @@ pub async fn sign_out(server_addr: &str, client_id: &str) -> io::Result<String> 
     Ok(ack)
 }
 
-pub async fn mark_client_unreachable(server_addr: &str, client_id: &str) -> io::Result<String> {
+pub async fn mark_client_unreachable(server_addr: &str, client_id: &str) -> io::Result<()> {
+    // Try to connect to the server within the timeout duration
     let mut socket = timeout(Duration::from_secs(5), TcpStream::connect(server_addr)).await??;
 
     println!("Connected to server.");
 
-    // Send message to mark client as unreachable
+    // Send the "UNREACHABLE" message to the server
     let unreachable_message = format!("UNREACHABLE {}", client_id);
     timeout(Duration::from_secs(5), socket.write_all(unreachable_message.as_bytes())).await??;
     println!("Unreachable request sent with ID: {}", client_id);
 
-    // Read the server's response
-    let mut buffer = [0u8; 128];
-    let n = timeout(Duration::from_secs(5), socket.read(&mut buffer)).await??;
-
-    let response = String::from_utf8_lossy(&buffer[..n]).to_string();
-
-    println!("Unreachable response: {}", response);
-    Ok(response)
+    // No need to read the response
+    Ok(())
 }

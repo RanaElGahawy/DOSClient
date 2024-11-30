@@ -57,7 +57,7 @@ async fn main() -> io::Result<()> {
     }
 
     // Start the UDP listener in a background task
-    let udp_listen_handle = task::spawn(udp_listener_task());
+    let _ = task::spawn(udp_listener_task());
 
     loop {
         println!("Enter 0 to sign out, 1 to show active clients:");
@@ -104,7 +104,7 @@ async fn main() -> io::Result<()> {
 
                 // Send a request to mark the client as unreachable
                 match server_registeration::mark_client_unreachable(server_addr, unreachable_id).await {
-                    Ok(response) => println!("Successfully marked client ID {} as unreachable: {}", unreachable_id, response),
+                    Ok(_) => println!("Successfully marked client ID {} as unreachable", unreachable_id),
                     Err(e) => eprintln!("Failed to mark client ID {} as unreachable: {}", unreachable_id, e),
                 }
             }
