@@ -1,5 +1,5 @@
 use std::env;
-use std::io::{self};
+use std::io::{self, Write};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::{timeout, Duration};
@@ -21,13 +21,35 @@ async fn main() -> io::Result<()> {
 
     println!("Connecting to server at: {}", server_addr);
 
-    // Register with the server and get a unique client ID
-    match register_with_server(server_addr).await {
-        Ok(client_id) => println!("Client registered with ID: {}", client_id),
-        Err(e) => eprintln!("Failed to register with server: {}", e),
+    loop {
+        println!("Enter 1 to register, 2 to sign out:");
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        match input.trim() {
+            "1" => {
+                match register_with_server(server_addr).await {
+                    Ok(client_id) => println!("Client registered with ID: {}", client_id),
+                    Err(e) => eprintln!("Failed to register with server: {}", e),
+                }
+            }
+            "2" => {
+                loop {
+                    match sign_out(server_addr).await {
+                        Ok(response) => {
+                            if response.trim() == "ACK" {
+                                println!("Sign out successful. Terminating program.");
+                                return Ok(());
+                            } else {
+                                eprintln!("Sign out not acknowledged (NAK). Retrying...");
+                            }
+                        }
+                        Err(e) => eprintln!("Failed to sign out: {}", e),
+                    }
+                }
+            }
+            _ => println!("Invalid input. Please enter 1 or 2."),
+        }
     }
-
-    Ok(())
 }
 
 async fn register_with_server(server_addr: &str) -> io::Result<String> {
@@ -47,4 +69,23 @@ async fn register_with_server(server_addr: &str) -> io::Result<String> {
 
     println!("Received client ID: {}", client_id);
     Ok(client_id)
+}
+
+async fn sign_out(server_addr: &str) -> io::Result<String> {
+    let mut socket = timeout(Duration::from_secs(5), TcpStream::connect(server_addr)).await??;
+
+    println!("Connected to server.");
+
+    // Send sign-out request
+    timeout(Duration::from_secs(5), socket.write_all(b"SIGN_OUT")).await??;
+    println!("Sign out request sent.");
+
+    // Read the acknowledgment from the server
+    let mut buffer = [0u8; 128];
+    let n = timeout(Duration::from_secs(5), socket.read(&mut buffer)).await??;
+
+    let ack = String::from_utf8_lossy(&buffer[..n]).to_string();
+
+    println!("Sign out status: {}", ack);
+    Ok(ack)
 }
