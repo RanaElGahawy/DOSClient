@@ -1,8 +1,12 @@
 mod show_me;
 mod send_me;
+mod view; // New module for the "view" functionality
+mod encryption;
+mod decoder;
 
 use show_me::{handle_show_me_request, send_show_me_request};
 use send_me::{handle_send_me_request, send_me_request};
+use view::view_image; // Import the view function
 
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -27,7 +31,7 @@ async fn main() -> io::Result<()> {
     });
 
     loop {
-        println!("Enter 1 to register, 2 to sign out, 3 to 'show me', 4 to 'send me':");
+        println!("Enter 1 to register, 2 to sign out, 3 to 'show me', 4 to 'send me', 5 to 'view':");
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
         match input.trim() {
@@ -52,12 +56,20 @@ async fn main() -> io::Result<()> {
                     eprintln!("Failed to send images: {}", e);
                 }
             }
+            "5" => {
+                println!("Enter the image name to view:");
+                let mut image_name = String::new();
+                io::stdin().read_line(&mut image_name)?;
+                let image_name = image_name.trim();
+                if let Err(e) = view_image(image_name).await {
+                    eprintln!("Failed to view image: {}", e);
+                }
+            }
             _ => println!("Invalid input."),
         }
     }
 }
 
-// Handles incoming requests
 async fn listen_for_requests(addr: &str) -> io::Result<()> {
     let listener = TcpListener::bind(addr).await?;
     println!("Listening for requests on {}", addr);
