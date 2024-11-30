@@ -4,6 +4,8 @@ use std::io::{self, Read, Write};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio::net::UdpSocket;
+use tokio::task;
 
 mod server_registeration;
 mod active_clients; // Include the new module
@@ -54,6 +56,9 @@ async fn main() -> io::Result<()> {
         }
     }
 
+    // Start the UDP listener in a background task
+    let udp_listen_handle = task::spawn(udp_listener_task());
+
     loop {
         println!("Enter 0 to sign out, 1 to show active clients:");
         let mut input = String::new();
@@ -85,7 +90,47 @@ async fn main() -> io::Result<()> {
                     Err(e) => eprintln!("Failed to fetch active clients: {}", e),
                 }
             }
+            "2" => {
+                // Option 3: Provide an unreachable client ID
+                println!("Enter the ID of the client to mark as unreachable:");
+                let mut unreachable_id = String::new();
+                io::stdin().read_line(&mut unreachable_id)?;
+                let unreachable_id = unreachable_id.trim();
+
+                if unreachable_id.is_empty() {
+                    eprintln!("Client ID cannot be empty.");
+                    continue;
+                }
+
+                // Send a request to mark the client as unreachable
+                match server_registeration::mark_client_unreachable(server_addr, unreachable_id).await {
+                    Ok(response) => println!("Successfully marked client ID {} as unreachable: {}", unreachable_id, response),
+                    Err(e) => eprintln!("Failed to mark client ID {} as unreachable: {}", unreachable_id, e),
+                }
+            }
             _ => println!("Invalid input. Please enter 0 to sign out or 1 to show active clients."),
+        }
+    }
+}
+
+async fn udp_listener_task() {
+    let socket = UdpSocket::bind("0.0.0.0:12345").await.unwrap(); // Bind to a local port to listen
+    let mut buf = [0; 1024]; // Buffer to hold incoming data
+
+    loop {
+        match socket.recv_from(&mut buf).await {
+            Ok((n, addr)) => {
+                let received_message = String::from_utf8_lossy(&buf[..n]);
+                if received_message == "PING" {
+                    // Respond with "ACK" when a PING message is received
+                    if let Err(e) = socket.send_to(b"ACK", addr).await {
+                        eprintln!("Failed to send ACK: {}", e);
+                    } else {
+                        println!("Received PING from {}. Responding with ACK.", addr);
+                    }
+                }
+            }
+            Err(e) => eprintln!("Error receiving UDP packet: {}", e),
         }
     }
 }
