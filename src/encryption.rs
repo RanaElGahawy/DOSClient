@@ -143,3 +143,20 @@ async fn main() -> io::Result<()> {
 
     Ok(())
 }
+/// Updates access rights in the metadata without re-encrypting the entire image.
+pub fn update_access_rights(image_path: &str, new_access_rights: u8) -> io::Result<()> {
+    let mut image = image::open(image_path)
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?
+        .to_rgba();
+
+    let (_, height) = image.dimensions();
+    let pixel = image.get_pixel_mut(0, height - 1);
+    pixel[0] = new_access_rights; // Update the red channel with the new access rights
+
+    image.save(image_path)
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?; // Save updated image
+
+    println!("Updated access rights in '{}'. New value: {}", image_path, new_access_rights);
+
+    Ok(())
+}

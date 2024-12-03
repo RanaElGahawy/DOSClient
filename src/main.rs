@@ -45,7 +45,7 @@ async fn main() -> io::Result<()> {
     });
 
     loop {
-        println!("Enter 1 to register, 2 to sign out, 3 to 'send me', 4 to 'show me', 5 to 'view', AR for Access Rights, 6 to update access rights:");
+        println!("Enter 1 to register  \n 2 to sign out\n 3 to 'send me'\n 4 to 'show me'\n 5 to 'view'\nAR for Access Rights\n6 to update access rights:");
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
 
@@ -121,7 +121,7 @@ async fn main() -> io::Result<()> {
                 let mut image_name = String::new();
                 io::stdin().read_line(&mut image_name)?;
 
-                println!("Enter the new access rights (1-5):");
+                println!("Enter the new access rights (0-10):");
                 let mut new_access_rights = String::new();
                 io::stdin().read_line(&mut new_access_rights)?;
                 let new_access_rights: u8 = new_access_rights.trim().parse().unwrap_or(0);
@@ -215,7 +215,7 @@ async fn process_update_request(request: &str, socket: &mut TcpStream) -> io::Re
     let image_name = parts[1];
     let new_access_rights: u8 = parts[2].parse().unwrap_or(0);
 
-    if new_access_rights < 1 || new_access_rights > 5 {
+    if new_access_rights < 0 || new_access_rights > 10 {
         eprintln!("Invalid access rights in UPDATE request: {}", request);
         return Ok(());
     }
@@ -226,6 +226,7 @@ async fn process_update_request(request: &str, socket: &mut TcpStream) -> io::Re
         return Ok(());
     }
 
+    // Use the optimized function to update access rights
     update_access_rights(&image_path, new_access_rights)?;
     println!("Access rights for '{}' updated to '{}'.", image_name, new_access_rights);
 

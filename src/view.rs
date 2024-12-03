@@ -2,9 +2,6 @@ use steganography::decoder;
 use image::{ImageBuffer, Rgba, GenericImageView};
 use std::process::Command;
 use std::fs;
-/// Opens an image using the system's default viewer and waits for it to close.
-use std::time::Duration;
-use std::thread;
 
 /// Handles viewing and decoding an image.
 pub fn view_image(encoded_image_name: &str) {
@@ -25,13 +22,13 @@ pub fn view_image(encoded_image_name: &str) {
     if access_rights > 0 {
         println!("Access rights remaining: {}", access_rights);
 
-        // Decrement access rights
-        decrement_access_rights(&mut encoded_image, &encoded_image_path, access_rights);
+        // Decode and display the hidden image first
+        decode_and_display_image(&encoded_image);
+
+        // Decrement access rights after displaying the image
+        decrement_access_rights_metadata(&mut encoded_image, &encoded_image_path, access_rights);
 
         println!("Access rights decremented. New value: {}", access_rights - 1);
-
-        // Decode and display the hidden image
-        decode_and_display_image(&encoded_image);
     } else {
         println!("No access rights remaining. Displaying the encoded image.");
         display_encoded_image(&encoded_image_path);
@@ -45,8 +42,8 @@ fn get_access_rights_from_image(image: &ImageBuffer<Rgba<u8>, Vec<u8>>) -> u32 {
     pixel[0] as u32 // Access rights stored in the red channel
 }
 
-/// Decrements access rights and updates the image.
-fn decrement_access_rights(
+/// Directly decrements access rights in the metadata without full re-encryption.
+fn decrement_access_rights_metadata(
     image: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
     image_path: &str,
     access_rights: u32,
@@ -91,8 +88,7 @@ fn display_encoded_image(encoded_image_path: &str) {
     open_image_and_wait(encoded_image_path);
 }
 
-
-
+/// Opens an image using the system's default viewer and waits for it to close.
 fn open_image_and_wait(file_path: &str) {
     #[cfg(target_os = "macos")]
     {
@@ -112,7 +108,6 @@ fn open_image_and_wait(file_path: &str) {
 
     #[cfg(target_os = "linux")]
     {
-        // Attempt to use a blocking viewer first
         if Command::new("eog").arg(file_path).status().is_err() {
             println!("`eog` failed or didn't block. Trying `gio open`...");
             Command::new("gio")
@@ -120,16 +115,5 @@ fn open_image_and_wait(file_path: &str) {
                 .status()
                 .expect("Failed to open the image.");
         }
-
-        // Add a fallback delay to allow viewing
-        println!("Image will be deleted automatically after 5 seconds...");
-        std::thread::sleep(std::time::Duration::from_secs(5));
-    }
-
-    // Delete the file after the viewer closes or the delay completes
-    if std::fs::remove_file(file_path).is_ok() {
-        println!("Temporary file '{}' deleted.", file_path);
-    } else {
-        eprintln!("Failed to delete temporary file '{}'.", file_path);
     }
 }
