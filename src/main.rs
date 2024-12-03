@@ -3,13 +3,13 @@ use std::fs::File;
 use std::io::{self, Read, Write};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
-use tokio::net::{TcpStream, UdpSocket};
+use tokio::net::UdpSocket;
 use tokio::task;
 
 mod server_registeration;
 mod active_clients; // Include the new module
+mod encryption;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -114,114 +114,20 @@ async fn main() -> io::Result<()> {
                 let mut image_path = String::new();
                 io::stdin().read_line(&mut image_path)?;
                 let image_path = image_path.trim();
-            
-                if image_path.is_empty() {
-                    eprintln!("Image path cannot be empty.");
-                    continue;
-                }
-            
-                // Step 1: Send "ENCRYPTION" request to the server
-                match send_encryption_request(server_addr).await {
-                    Ok(mut socket) => {
-                        // Step 2: Wait for server's acknowledgment (ACK)
-                        match wait_for_encryption_acknowledgment(&mut socket).await {
-                            Ok(_) => {
-                                println!("Sending image.");
-                                // Step 3: Read the image file and send it to the server
-                                match send_image_to_server(&mut socket, image_path).await {
-                                    Ok(_) => {
-                                        println!("Image sent for encryption successfully.");
-            
-                                        // Step 4: Wait for the encrypted image or handle timeout
-                                        let _ = tokio::select! {
-                                            response = receive_encrypted_image(socket) => {
-                                                match response {
-                                                    Ok(_) => println!("Encrypted image received."),
-                                                    Err(e) => eprintln!("Error receiving encrypted image: {}", e),
-                                                }
-                                            },
-                                            _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => {
-                                                println!("Waiting for image encryption timed out.");
-                                            }
-                                        };
-                                    }
-                                    Err(e) => eprintln!("Failed to send image: {}", e),
-                                }
-                            }
-                            Err(e) => eprintln!("Failed to receive acknowledgment from server: {}", e),
-                        }
-                    }
-                    Err(e) => eprintln!("Failed to send encryption request: {}", e),
+
+                let save_folder = "Borrowed Images";
+                let timeout_duration = std::time::Duration::from_secs(60);
+
+                match encryption::perform_image_encryption(server_addr, image_path, save_folder, timeout_duration).await {
+                    Ok(_) => println!("Encryption process completed successfully."),
+                    Err(e) => eprintln!("Encryption failed: {}", e),
                 }
             }
+
 
             _ => println!("Invalid input. Please enter 0 to sign out or 1 to show active clients."),
         }
     }
-}
-
-async fn wait_for_encryption_acknowledgment(socket: &mut TcpStream) -> io::Result<()> {
-    let mut buffer = vec![0u8; 1024];
-
-    // Wait for the server to acknowledge the ENCRYPTION command
-    let n = socket.read(&mut buffer).await?;
-    if n == 0 {
-        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "No acknowledgment from server"));
-    }
-
-    // Check for a specific acknowledgment message from the server
-    let response = String::from_utf8_lossy(&buffer[..n]);
-    if response.trim() == "ACK" {
-        Ok(())
-    } else {
-        Err(io::Error::new(io::ErrorKind::Other, "Unexpected response from server"))
-    }
-}
-
-// Function to send the "ENCRYPTION" request
-async fn send_encryption_request(server_addr: &str) -> io::Result<TcpStream> {
-    let mut socket = TcpStream::connect(server_addr).await?;
-    let encryption_request = "ENCRYPTION";
-    socket.write_all(encryption_request.as_bytes()).await?;
-    socket.flush().await?;  // Ensure the message is sent
-    Ok(socket)
-}
-
-async fn send_image_to_server(socket: &mut TcpStream, image_path: &str) -> io::Result<()> {
-    let mut file = File::open(image_path)?;
-    let mut image_data = Vec::new();
-    file.read_to_end(&mut image_data)?;
-
-    // Send the image data over the same socket in chunks of 1024 bytes
-    let chunk_size = 1024;
-    let mut start = 0;
-    while start < image_data.len() {
-        let end = std::cmp::min(start + chunk_size, image_data.len());
-        let chunk = &image_data[start..end];
-        socket.write_all(chunk).await?;
-        socket.flush().await?;  // Ensure each chunk is sent immediately
-        start = end;
-    }
-
-    Ok(())
-}
-
-
-// Function to receive the encrypted image from the server
-async fn receive_encrypted_image(mut socket: TcpStream) -> io::Result<()> {
-    let mut buffer = vec![0u8; 1024]; // Adjust the buffer size as needed
-
-    let n = socket.read(&mut buffer).await?;
-    if n == 0 {
-        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "No data received"));
-    }
-
-    // Save the received encrypted image
-    let encrypted_image_path = "encrypted_image.png"; // Customize path as necessary
-    let mut encrypted_file = tokio::fs::File::create(encrypted_image_path).await?;
-    encrypted_file.write_all(&buffer[..n]).await?;
-
-    Ok(())
 }
 
 
