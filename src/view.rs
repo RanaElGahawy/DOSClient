@@ -2,6 +2,9 @@ use steganography::decoder;
 use image::{ImageBuffer, Rgba, GenericImageView};
 use std::process::Command;
 use std::fs;
+/// Opens an image using the system's default viewer and waits for it to close.
+use std::time::Duration;
+use std::thread;
 
 /// Handles viewing and decoding an image.
 pub fn view_image(encoded_image_name: &str) {
@@ -88,7 +91,8 @@ fn display_encoded_image(encoded_image_path: &str) {
     open_image_and_wait(encoded_image_path);
 }
 
-/// Opens an image using the system's default viewer and waits for it to close.
+
+
 fn open_image_and_wait(file_path: &str) {
     #[cfg(target_os = "macos")]
     {
@@ -108,9 +112,24 @@ fn open_image_and_wait(file_path: &str) {
 
     #[cfg(target_os = "linux")]
     {
-        Command::new("eog")
-            .arg(file_path)
-            .status()
-            .expect("Failed to open the image.");
+        // Attempt to use a blocking viewer first
+        if Command::new("eog").arg(file_path).status().is_err() {
+            println!("`eog` failed or didn't block. Trying `gio open`...");
+            Command::new("gio")
+                .args(&["open", file_path])
+                .status()
+                .expect("Failed to open the image.");
+        }
+
+        // Add a fallback delay to allow viewing
+        println!("Image will be deleted automatically after 5 seconds...");
+        std::thread::sleep(std::time::Duration::from_secs(5));
+    }
+
+    // Delete the file after the viewer closes or the delay completes
+    if std::fs::remove_file(file_path).is_ok() {
+        println!("Temporary file '{}' deleted.", file_path);
+    } else {
+        eprintln!("Failed to delete temporary file '{}'.", file_path);
     }
 }
