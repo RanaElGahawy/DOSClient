@@ -1,4 +1,3 @@
-use std::env;
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::collections::HashMap;
@@ -13,18 +12,14 @@ mod encryption;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
-    let args: Vec<String> = env::args().collect();
-    if args.len() != 2 {
-        eprintln!("Usage: client <server_ip:port>");
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() < 4 {
+        eprintln!("Usage: {} <self_ip:port> <next_ip:port> <prev_ip:port>", args[0]);
         return Ok(());
     }
 
-    let server_addr = &args[1];
-
-    if !server_addr.contains(':') {
-        eprintln!("Invalid server address. Expected format: <ip>:<port>");
-        return Ok(());
-    }
+    // Use references to avoid ownership issues
+    let servers: Vec<&str> = vec![&args[1], &args[2], &args[3]];
 
     let mut client_id = String::new();
     let active_clients = Arc::new(Mutex::new(HashMap::new())); // Shared active clients list
@@ -37,14 +32,14 @@ async fn main() -> io::Result<()> {
         println!("Found existing client ID: {}", client_id);
 
         // Send REJOIN request
-        match server_registeration::rejoin_with_server(server_addr, &client_id).await {
+        match server_registeration::rejoin_with_server(&servers, &client_id).await {
             Ok(response) => println!("Rejoin successful: {}", response),
             Err(e) => eprintln!("Failed to rejoin with server: {}", e),
         }
     } else {
         // No client_ID file, register with the server
         println!("No existing client ID found. Registering with the server...");
-        match server_registeration::register_with_server(server_addr).await {
+        match server_registeration::register_with_server(&servers).await {
             Ok(id) => {
                 client_id = id.clone();
                 // Save the new client ID to a file
@@ -69,7 +64,7 @@ async fn main() -> io::Result<()> {
                 if client_id.is_empty() {
                     println!("You must register first before signing out.");
                 } else {
-                    match server_registeration::sign_out(server_addr, &client_id).await {
+                    match server_registeration::sign_out(&servers, &client_id).await {
                         Ok(response) => {
                             if response.trim() == "ACK" {
                                 println!("Sign out successful. Terminating program.");
@@ -83,7 +78,7 @@ async fn main() -> io::Result<()> {
                 }
             }
             "1" => {
-                match active_clients::show_active_clients(server_addr, Arc::clone(&active_clients)).await {
+                match active_clients::show_active_clients(&servers, Arc::clone(&active_clients)).await {
                     Ok(_) => {
                         let clients = active_clients.lock().await; // Asynchronously acquire the lock
                         println!("Active clients: {:?}", *clients);
@@ -92,7 +87,6 @@ async fn main() -> io::Result<()> {
                 }
             }
             "2" => {
-                // Option 2: Provide an unreachable client ID
                 println!("Enter the ID of the client to mark as unreachable:");
                 let mut unreachable_id = String::new();
                 io::stdin().read_line(&mut unreachable_id)?;
@@ -103,8 +97,7 @@ async fn main() -> io::Result<()> {
                     continue;
                 }
 
-                // Send a request to mark the client as unreachable
-                match server_registeration::mark_client_unreachable(server_addr, unreachable_id).await {
+                match server_registeration::mark_client_unreachable(&servers, unreachable_id).await {
                     Ok(_) => println!("Successfully marked client ID {} as unreachable", unreachable_id),
                     Err(e) => eprintln!("Failed to mark client ID {} as unreachable: {}", unreachable_id, e),
                 }
@@ -118,17 +111,34 @@ async fn main() -> io::Result<()> {
                 let save_folder = "Borrowed Images";
                 let timeout_duration = std::time::Duration::from_secs(60);
 
-                match encryption::perform_image_encryption(server_addr, image_path, save_folder, timeout_duration).await {
-                    Ok(_) => println!("Encryption process completed successfully."),
-                    Err(e) => eprintln!("Encryption failed: {}", e),
+                let mut tasks = Vec::new();
+
+                for server in &servers { // Use a reference to iterate over the servers
+                    let server = server.to_string(); // Clone for each task
+                    let image_path = image_path.to_string();
+                    let save_folder = save_folder.to_string();
+
+                    tasks.push(tokio::spawn(async move {
+                        encryption::perform_image_encryption(&server, &image_path, &save_folder, timeout_duration).await
+                    }));
+                }
+
+                for task in tasks {
+                    match task.await {
+                        Ok(Ok(())) => {
+                            println!("Encryption process completed successfully by one of the servers.");
+                            break;
+                        }
+                        Ok(Err(_)) => {}
+                        Err(_) => {}
+                    }
                 }
             }
-
-
             _ => println!("Invalid input. Please enter 0 to sign out or 1 to show active clients."),
         }
     }
 }
+
 
 
 async fn udp_listener_task() {
