@@ -1,9 +1,8 @@
 use steganography::decoder;
 use std::env;
-use open;
+use std::process::Command;
 use image::{ImageBuffer, Rgba, GenericImageView};
-use std::fs::File;
-use std::io::Write;
+use std::fs;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -38,20 +37,59 @@ fn main() {
     }
 }
 
-pub fn decode_and_display_image(encoded_image: &ImageBuffer<Rgba<u8>, Vec<u8>>) {
+fn decode_and_display_image(encoded_image: &ImageBuffer<Rgba<u8>, Vec<u8>>) {
     // Create a decoder with the encoded image
     let decoder = decoder::Decoder::new(encoded_image.clone());
     let decoded_data = decoder.decode_alpha();
 
-    // Save the decoded data to a temporary file
-    let temp_file_path = "./borrowed_images/temp_decoded_image.png";
-    let mut temp_file = File::create(temp_file_path).expect("Failed to create temporary file");
-    temp_file
-        .write_all(&decoded_data)
-        .expect("Failed to write decoded data");
+    // Save and display the decoded image
+    if let Ok(decoded_image) = image::load_from_memory(&decoded_data) {
+        println!("Decoded image successfully. Now displaying...");
 
-    // Open the decoded image using the system's default viewer
-    open::that(temp_file_path).expect("Failed to open the decoded image");
+        // Save the image to a temporary file
+        let temp_file_path = "./borrowed_images/temp_decoded_image.png";
+        decoded_image
+            .save(temp_file_path)
+            .expect("Failed to save temporary decoded image");
+
+        // Open the temporary image using a blocking viewer
+        open_image_and_wait(temp_file_path);
+
+        // Delete the temporary file after displaying the image
+        if fs::remove_file(temp_file_path).is_ok() {
+            println!("Temporary file deleted.");
+        }
+    } else {
+        eprintln!("Failed to decode the image.");
+    }
+}
+
+fn open_image_and_wait(file_path: &str) {
+    // Use specific blocking image viewers for each platform
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("qlmanage")
+            .args(&["-p", file_path])
+            .status()
+            .expect("Failed to open the image.");
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("cmd")
+            .args(&["/C", "start", "/WAIT", file_path])
+            .status()
+            .expect("Failed to open the image.");
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Use `eog` (Eye of GNOME) or similar blocking viewers
+        Command::new("eog") // Replace `eog` with your preferred viewer if needed
+            .arg(file_path)
+            .status()
+            .expect("Failed to open the image.");
+    }
 }
 
 fn get_access_rights_from_image(image: &ImageBuffer<Rgba<u8>, Vec<u8>>) -> u32 {
@@ -85,5 +123,5 @@ fn decrement_access_rights(
 
 fn display_encoded_image(encoded_image_path: &str) {
     // Open the encoded image using the system's default viewer
-    open::that(encoded_image_path).expect("Failed to open the encoded image using the default viewer");
+    open_image_and_wait(encoded_image_path);
 }
