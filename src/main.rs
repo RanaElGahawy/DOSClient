@@ -6,6 +6,7 @@ mod decoder;
 mod server_registeration;
 mod active_clients;
 
+
 use show_me::{handle_show_me_request, send_show_me_request};
 use send_me::{send_me_request, handle_send_me_request_with_prompt};
 use std::fs::File;
@@ -27,6 +28,8 @@ struct AccessRightsState {
     socket: Option<Arc<Mutex<TcpStream>>>, // Arc-wrapped socket for thread-safe sharing
 }
 
+
+
 #[tokio::main]
 async fn main() -> io::Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -38,7 +41,7 @@ async fn main() -> io::Result<()> {
     let server_addr = args[1].to_string();
     println!("Starting client and listening at: {}", server_addr);
 
-    let client_addr = "127.0.0.1:8082".to_string();
+    let client_addr = "10.7.19.204:8082".to_string();
 
     let mut client_id = String::new();
     let active_clients: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new())); // Shared active clients list
@@ -46,18 +49,17 @@ async fn main() -> io::Result<()> {
     let server_addr_clone = client_addr.clone();
     let access_rights_state_clone = Arc::clone(&access_rights_state);
 
-     // Check if client_ID file exists
-     if let Ok(mut file) = File::open("client_ID") {
+    // Check if client_ID file exists
+    if let Ok(mut file) = File::open("client_ID") {
         let mut id = String::new();
         file.read_to_string(&mut id)?;
         client_id = id.trim().to_string();
         println!("Found existing client ID: {}", client_id);
 
-        // Send REJOIN request
-        match server_registeration::rejoin_with_server(&server_addr, &client_id).await {
-            Ok(response) => println!("Rejoin successful: {}", response),
-            Err(e) => eprintln!("Failed to rejoin with server: {}", e),
-        }
+        if let Err(e) = server_registeration::rejoin_with_server(&server_addr, &client_id).await {
+            eprintln!("Failed to rejoin with server: {}", e);
+        }                                    
+           
     } else {
         // No client_ID file, register with the server
         println!("No existing client ID found. Registering with the server...");
@@ -307,27 +309,12 @@ async fn process_update_request(request: &str, socket: &mut TcpStream) -> io::Re
     }
 
     // Use the optimized function to update access rights
-    update_access_rights(&image_path, new_access_rights)?;
+    server_registeration::update_access_rights(&image_path, new_access_rights).await?;
     println!("Access rights for '{}' updated to '{}'.", image_name, new_access_rights);
 
     socket
         .write_all(b"Access rights updated successfully.\n")
         .await?;
-
-    Ok(())
-}
-
-fn update_access_rights(image_path: &str, new_access_rights: u8) -> io::Result<()> {
-    let mut image = image::open(image_path)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?
-        .to_rgba();
-
-    let (_, height) = image.dimensions();
-    let pixel = image.get_pixel_mut(0, height - 1);
-    pixel[0] = new_access_rights; // Update the red channel with the new access rights
-
-    image.save(image_path)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?; // Save updated image
 
     Ok(())
 }
