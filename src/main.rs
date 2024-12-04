@@ -94,8 +94,8 @@ async fn main() -> io::Result<()> {
     loop {
         println!(
             "Enter:\n\
-             1 to register\n\
-             2 to sign out\n\
+             1 to show active clients\n\
+             2 to mark a client as unreachable\n\
              3 to 'send me'\n\
              4 to 'show me'\n\
              5 to 'view'\n\
