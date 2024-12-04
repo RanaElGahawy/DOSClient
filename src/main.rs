@@ -3,16 +3,20 @@ mod send_me;
 mod view;
 mod encryption;
 mod decoder;
+mod server_registeration;
+mod active_clients;
 
 use show_me::{handle_show_me_request, send_show_me_request};
 use send_me::{send_me_request, handle_send_me_request_with_prompt};
+use std::fs::File;
 use view::view_image; // Function for option 5
 
 use tokio::net::{TcpListener, TcpStream};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::io;
+use std::io::{self, Read, Write};
 use tokio::task;
 use std::path::Path;
 use crate::encryption::encode_image_with_hidden;
@@ -34,9 +38,42 @@ async fn main() -> io::Result<()> {
     let server_addr = args[1].to_string();
     println!("Starting client and listening at: {}", server_addr);
 
+    let client_addr = "127.0.0.1:8082".to_string();
+
+    let mut client_id = String::new();
+    let active_clients: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new())); // Shared active clients list
     let access_rights_state = Arc::new(Mutex::new(AccessRightsState::default()));
-    let server_addr_clone = server_addr.clone();
+    let server_addr_clone = client_addr.clone();
     let access_rights_state_clone = Arc::clone(&access_rights_state);
+
+     // Check if client_ID file exists
+     if let Ok(mut file) = File::open("client_ID") {
+        let mut id = String::new();
+        file.read_to_string(&mut id)?;
+        client_id = id.trim().to_string();
+        println!("Found existing client ID: {}", client_id);
+
+        // Send REJOIN request
+        match server_registeration::rejoin_with_server(&server_addr, &client_id).await {
+            Ok(response) => println!("Rejoin successful: {}", response),
+            Err(e) => eprintln!("Failed to rejoin with server: {}", e),
+        }
+    } else {
+        // No client_ID file, register with the server
+        println!("No existing client ID found. Registering with the server...");
+        match server_registeration::register_with_server(&server_addr).await {
+            Ok(id) => {
+                client_id = id.clone();
+                // Save the new client ID to a file
+                if let Err(e) = save_client_id_to_file(&client_id) {
+                    eprintln!("Failed to save client ID to file: {}", e);
+                }
+                println!("Client registered with ID: {}", client_id);
+            }
+            Err(e) => eprintln!("Failed to register with server: {}", e),
+        }
+    }
+       
 
     task::spawn(async move {
         if let Err(e) = listen_for_requests(&server_addr_clone, access_rights_state_clone).await {
@@ -50,6 +87,49 @@ async fn main() -> io::Result<()> {
         io::stdin().read_line(&mut input)?;
 
         match input.trim() {
+            "0" => {
+                if client_id.is_empty() {
+                    println!("You must register first before signing out.");
+                } else {
+                    match server_registeration::sign_out(&server_addr, &client_id).await {
+                        Ok(response) => {
+                            if response.trim() == "ACK" {
+                                println!("Sign out successful. Terminating program.");
+                                return Ok(());
+                            } else {
+                                eprintln!("Sign out not acknowledged (NAK). Retrying...");
+                            }
+                        }
+                        Err(e) => eprintln!("Failed to sign out: {}", e),
+                    }
+                }
+            }
+            "1" => {
+                match active_clients::show_active_clients(&server_addr, Arc::clone(&active_clients)).await {
+                    Ok(_) => {
+                        let clients = active_clients.lock().await; // Asynchronously acquire the lock
+                        println!("Active clients: {:?}", *clients);
+                    }
+                    Err(e) => eprintln!("Failed to fetch active clients: {}", e),
+                }
+            }
+            "2" => {
+                println!("Enter the ID of the client to mark as unreachable:");
+                let mut unreachable_id = String::new();
+                io::stdin().read_line(&mut unreachable_id)?;
+                let unreachable_id = unreachable_id.trim();
+
+                if unreachable_id.is_empty() {
+                    eprintln!("Client ID cannot be empty.");
+                    continue;
+                }
+
+                match server_registeration::mark_client_unreachable(&server_addr, unreachable_id).await {
+                    Ok(_) => println!("Successfully marked client ID {} as unreachable", unreachable_id),
+                    Err(e) => eprintln!("Failed to mark client ID {} as unreachable: {}", unreachable_id, e),
+                }
+            }
+
             "3" => {
                 println!("Enter target client address (IP:port):");
                 let mut target_addr = String::new();
@@ -271,5 +351,11 @@ async fn send_image_with_rights(image_name: String, rights: u8, socket: Arc<Mute
     } else {
         println!("Image '{}' not found.", image_name);
     }
+    Ok(())
+}
+
+fn save_client_id_to_file(client_id: &str) -> io::Result<()> {
+    let mut file = File::create("client_ID")?;
+    file.write_all(client_id.as_bytes())?;
     Ok(())
 }
