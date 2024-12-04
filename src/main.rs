@@ -43,11 +43,9 @@ async fn main() -> io::Result<()> {
     let mut client_id = String::new();
     let active_clients: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new())); // Shared active clients list
     let access_rights_state = Arc::new(Mutex::new(AccessRightsState::default()));
-    let server_addr_clone = client_addr.clone();
-    let access_rights_state_clone = Arc::clone(&access_rights_state);
 
-     // Check if client_ID file exists
-     if let Ok(mut file) = File::open("client_ID") {
+    // Check if client_ID file exists
+    if let Ok(mut file) = File::open("client_ID") {
         let mut id = String::new();
         file.read_to_string(&mut id)?;
         client_id = id.trim().to_string();
@@ -64,7 +62,6 @@ async fn main() -> io::Result<()> {
         match server_registeration::register_with_server(&server_addr).await {
             Ok(id) => {
                 client_id = id.clone();
-                // Save the new client ID to a file
                 if let Err(e) = save_client_id_to_file(&client_id) {
                     eprintln!("Failed to save client ID to file: {}", e);
                 }
@@ -73,169 +70,154 @@ async fn main() -> io::Result<()> {
             Err(e) => eprintln!("Failed to register with server: {}", e),
         }
     }
-       
 
     task::spawn(async move {
-        if let Err(e) = listen_for_requests(&server_addr_clone, access_rights_state_clone).await {
+        if let Err(e) = listen_for_requests(&client_addr, Arc::clone(&access_rights_state)).await {
             eprintln!("Error in listener: {}", e);
         }
     });
 
     loop {
-        println!("Enter 1 to register  \n 2 to sign out\n 3 to 'send me'\n 4 to 'show me'\n 5 to 'view'\nAR for Access Rights\n6 to update access rights:");
+        println!(
+            "Enter:\n\
+             1 to register\n\
+             2 to sign out\n\
+             3 to 'send me'\n\
+             4 to 'show me'\n\
+             5 to 'view'\n\
+             AR for Access Rights\n\
+             6 to update access rights"
+        );
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
 
-       
-match input.trim() {
-    "0" => {
-        if client_id.is_empty() {
-            println!("You must register first before signing out.");
-        } else {
-            match server_registeration::sign_out(&server_addr, &client_id).await {
-                Ok(response) => {
-                    if response.trim() == "ACK" {
-                        println!("Sign out successful. Terminating program.");
-                        return Ok(());
-                    } else {
-                        eprintln!("Sign out not acknowledged (NAK). Retrying...");
+        match input.trim() {
+            "1" => {
+                match active_clients::show_active_clients(&server_addr, Arc::clone(&active_clients)).await {
+                    Ok(_) => {
+                        let clients = active_clients.lock().await;
+                        println!("Active clients: {:?}", *clients);
                     }
-                }
-                Err(e) => eprintln!("Failed to sign out: {}", e),
-            }
-        }
-    }
-    "1" => {
-        match active_clients::show_active_clients(&server_addr, Arc::clone(&active_clients)).await {
-            Ok(_) => {
-                let clients = active_clients.lock().await; // Asynchronously acquire the lock
-                println!("Active clients: {:?}", *clients);
-            }
-            Err(e) => eprintln!("Failed to fetch active clients: {}", e),
-        }
-    }
-    "2" => {
-        println!("Enter the ID of the client to mark as unreachable:");
-        let mut unreachable_id = String::new();
-        io::stdin().read_line(&mut unreachable_id)?;
-        let unreachable_id = unreachable_id.trim();
-
-        if unreachable_id.is_empty() {
-            eprintln!("Client ID cannot be empty.");
-            continue;
-        }
-
-        match server_registeration::mark_client_unreachable(&server_addr, unreachable_id).await {
-            Ok(_) => println!("Successfully marked client ID {} as unreachable", unreachable_id),
-            Err(e) => eprintln!("Failed to mark client ID {} as unreachable: {}", unreachable_id, e),
-        }
-    }
-    "3" => {
-        println!("Enter target client address (IP:port):");
-        let mut target_addr = String::new();
-        io::stdin().read_line(&mut target_addr)?;
-
-        println!("Enter image names to request (comma-separated):");
-        let mut image_names = String::new();
-        io::stdin().read_line(&mut image_names)?;
-        let image_names: Vec<&str> = image_names.trim().split(',').collect();
-
-        if let Err(e) = send_me_request(target_addr.trim(), image_names).await {
-            eprintln!("Failed to request images: {}", e);
-            if e.kind() == io::ErrorKind::ConnectionRefused {
-                // Notify server about unreachable client
-                if let Err(err) = notify_server_of_unreachable_client(&server_addr, target_addr.trim()).await {
-                    eprintln!("Failed to notify server about unreachable client: {}", err);
+                    Err(e) => eprintln!("Failed to fetch active clients: {}", e),
                 }
             }
-        }
-    }
-    "4" => {
-        println!("Enter target client address (IP:port):");
-        let mut target_addr = String::new();
-        io::stdin().read_line(&mut target_addr)?;
-        match send_show_me_request(target_addr.trim()).await {
-            Ok(image_list) => {
-                println!("Images available on the target client:");
-                for image in image_list {
-                    println!("- {}", image);
+            "2" => {
+                println!("Enter the ID of the client to mark as unreachable:");
+                let mut unreachable_id = String::new();
+                io::stdin().read_line(&mut unreachable_id)?;
+                let unreachable_id = unreachable_id.trim();
+
+                if unreachable_id.is_empty() {
+                    eprintln!("Client ID cannot be empty.");
+                    continue;
+                }
+
+                match server_registeration::mark_client_unreachable(&server_addr, unreachable_id).await {
+                    Ok(_) => println!("Successfully marked client ID {} as unreachable", unreachable_id),
+                    Err(e) => eprintln!("Failed to mark client ID {} as unreachable: {}", unreachable_id, e),
                 }
             }
-            Err(e) => {
-                eprintln!("Failed to retrieve images: {}", e);
-                if e.kind() == io::ErrorKind::ConnectionRefused {
-                    // Notify server about unreachable client
-                    if let Err(err) = notify_server_of_unreachable_client(&server_addr, target_addr.trim()).await {
-                        eprintln!("Failed to notify server about unreachable client: {}", err);
-                    }
-                }
-            }
-        }
-    }
-    "5" => {
-        println!("Enter the name of the encoded image to view (from 'borrowed_images'):");
-        let mut image_name = String::new();
-        io::stdin().read_line(&mut image_name)?;
-        let image_name = image_name.trim();
+            "3" => {
+                println!("Enter the ID:port of the client to request images from:");
+                let mut client_id_port = String::new();
+                io::stdin().read_line(&mut client_id_port)?;
+                let client_id_port = client_id_port.trim();
 
-        view_image(image_name); // Call the view module's function
-    }
-    "AR" => {
-        let mut state = access_rights_state.lock().await;
-        if let Some(image_name) = state.pending_request.take() {
-            println!("Enter access rights for image '{}':", image_name);
-            let mut access_rights = String::new();
-            io::stdin().read_line(&mut access_rights)?;
+                if let Some(target_addr) = get_target_address(client_id_port, Arc::clone(&active_clients)).await {
+                    println!("Enter image names to request (comma-separated):");
+                    let mut image_names = String::new();
+                    io::stdin().read_line(&mut image_names)?;
+                    let image_names: Vec<&str> = image_names.trim().split(',').collect();
 
-            match access_rights.trim().parse::<u8>() {
-                Ok(rights) if rights >= 1 && rights <= 5 => {
-                    println!("Access rights '{}' accepted.", rights);
-                    if let Some(socket) = state.socket.take() {
-                        tokio::spawn(async move {
-                            if let Err(e) = send_image_with_rights(image_name, rights, socket).await {
-                                eprintln!("Error sending image: {}", e);
+                    if let Err(e) = send_me_request(&target_addr, image_names).await {
+                        eprintln!("Failed to request images: {}", e);
+                        if e.kind() == io::ErrorKind::ConnectionRefused {
+                            if let Err(err) = notify_server_of_unreachable_client(&server_addr, client_id_port).await {
+                                eprintln!("Failed to notify server about unreachable client: {}", err);
                             }
-                        });
+                        }
                     }
                 }
-                _ => println!("Invalid access rights. Please enter a value between 1 and 5."),
             }
-        } else {
-            println!("No pending access rights requests.");
-        }
-    }
-    "6" => {
-        println!("Enter target client address (IP:port):");
-        let mut target_addr = String::new();
-        io::stdin().read_line(&mut target_addr)?;
+            "4" => {
+                println!("Enter the ID:port of the client to view images from:");
+                let mut client_id_port = String::new();
+                io::stdin().read_line(&mut client_id_port)?;
+                let client_id_port = client_id_port.trim();
 
-        println!("Enter the name of the image to update:");
-        let mut image_name = String::new();
-        io::stdin().read_line(&mut image_name)?;
-
-        println!("Enter the new access rights (0-10):");
-        let mut new_access_rights = String::new();
-        io::stdin().read_line(&mut new_access_rights)?;
-        let new_access_rights: u8 = new_access_rights.trim().parse().unwrap_or(0);
-
-        if new_access_rights < 1 || new_access_rights > 5 {
-            println!("Invalid access rights. Please enter a value between 1 and 5.");
-            continue;
-        }
-
-        if let Err(e) = send_update_request(target_addr.trim(), image_name.trim(), new_access_rights).await {
-            eprintln!("Failed to send update request: {}", e);
-            if e.kind() == io::ErrorKind::ConnectionRefused {
-                // Notify server about unreachable client
-                if let Err(err) = notify_server_of_unreachable_client(&server_addr, target_addr.trim()).await {
-                    eprintln!("Failed to notify server about unreachable client: {}", err);
+                if let Some(target_addr) = get_target_address(client_id_port, Arc::clone(&active_clients)).await {
+                    match send_show_me_request(&target_addr).await {
+                        Ok(image_list) => {
+                            println!("Images available on the target client:");
+                            for image in image_list {
+                                println!("- {}", image);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to retrieve images: {}", e);
+                            if e.kind() == io::ErrorKind::ConnectionRefused {
+                                if let Err(err) = notify_server_of_unreachable_client(&server_addr, client_id_port).await {
+                                    eprintln!("Failed to notify server about unreachable client: {}", err);
+                                }
+                            }
+                        }
+                    }
                 }
             }
+            "5" => {
+                println!("Enter the name of the encoded image to view:");
+                let mut image_name = String::new();
+                io::stdin().read_line(&mut image_name)?;
+                view_image(image_name.trim());
+            }
+            _ => println!("Invalid input."),
         }
     }
-    _ => println!("Invalid input."),
-} 
-    } 
+}
+
+async fn notify_server_of_unreachable_client(
+    server_ip_and_port: &str,
+    client_id_port: &str,
+) -> io::Result<()> {
+    let parts: Vec<&str> = client_id_port.split(':').collect();
+    if parts.len() != 2 {
+        eprintln!("Invalid client_id:port format: {}", client_id_port);
+        return Ok(());
+    }
+    let client_id = parts[0].trim();
+
+    let mut socket = TcpStream::connect(server_ip_and_port).await?;
+    let message = format!("UNREACHABLE {}", client_id);
+    socket.write_all(message.as_bytes()).await?;
+    println!("Notified server about unreachable client ID: {}", client_id);
+    Ok(())
+}
+
+async fn get_target_address(
+    client_id_port: &str,
+    active_clients: Arc<Mutex<HashMap<String, String>>>,
+) -> Option<String> {
+    let parts: Vec<&str> = client_id_port.split(':').collect();
+    if parts.len() != 2 {
+        eprintln!("Invalid client_id:port format: {}", client_id_port);
+        return None;
+    }
+    let client_id = parts[0].trim();
+    let port = parts[1].trim();
+
+    let clients = active_clients.lock().await;
+    if let Some(ip) = clients.get(client_id) {
+        Some(format!("{}:{}", ip, port))
+    } else {
+        eprintln!("Client ID '{}' not found in the active clients map.", client_id);
+        None
+    }
+}
+
+fn save_client_id_to_file(client_id: &str) -> io::Result<()> {
+    let mut file = File::create("client_ID")?;
+    file.write_all(client_id.as_bytes())?;
+    Ok(())
 }
 
 async fn listen_for_requests(
@@ -366,57 +348,5 @@ async fn send_image_with_rights(image_name: String, rights: u8, socket: Arc<Mute
     Ok(())
 }
 
-fn save_client_id_to_file(client_id: &str) -> io::Result<()> {
-    let mut file = File::create("client_ID")?;
-    file.write_all(client_id.as_bytes())?;
-    Ok(())
-}
-async fn send_me_request_with_unreachable_check(
-    target_addr: &str,
-    image_names: Vec<&str>,
-    server_ip_and_port: &str,
-) -> io::Result<()> {
-    match send_me_request(target_addr, image_names).await {
-        Ok(_) => Ok(()),
-        Err(_) => {
-            // Send "UNREACHABLE" message to the server
-            notify_unreachable_server(server_ip_and_port, target_addr).await?;
-            Err(io::Error::new(
-                io::ErrorKind::ConnectionRefused,
-                format!("Target client {} is unreachable", target_addr),
-            ))
-        }
-    }
-}
 
-async fn send_show_me_request_with_unreachable_check(
-    target_addr: &str,
-    server_ip_and_port: &str,
-) -> io::Result<Vec<String>> {
-    match send_show_me_request(target_addr).await {
-        Ok(image_list) => Ok(image_list),
-        Err(_) => {
-            // Send "UNREACHABLE" message to the server
-            notify_unreachable_server(server_ip_and_port, target_addr).await?;
-            Err(io::Error::new(
-                io::ErrorKind::ConnectionRefused,
-                format!("Target client {} is unreachable", target_addr),
-            ))
-        }
-    }
-}
 
-async fn notify_unreachable_server(server_ip_and_port: &str, target_addr: &str) -> io::Result<()> {
-    let mut socket = TcpStream::connect(server_ip_and_port).await?;
-    let message = format!("UNREACHABLE {}\n", target_addr);
-    socket.write_all(message.as_bytes()).await?;
-    println!("Notified server: {}", message.trim());
-    Ok(())
-}
-async fn notify_server_of_unreachable_client(server_addr: &str, unreachable_client: &str) -> io::Result<()> {
-    let mut socket = TcpStream::connect(server_addr).await?;
-    let message = format!("UNREACHABLE {}", unreachable_client);
-    socket.write_all(message.as_bytes()).await?;
-    println!("Notified server about unreachable client: {}", unreachable_client);
-    Ok(())
-}
